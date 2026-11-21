@@ -85,9 +85,14 @@
             android:resizeableActivity="true"
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
+            <!-- Keep upstream eligible for Home, behind the personal activity. -->
+            <intent-filter android:priority="-1">
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
@@ -97,6 +102,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="simonschubert.github.io" android:pathPrefix="/omarchy-widgets/w" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".personal.android.PersonalHomeActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.personal.home"
+            android:theme="@style/Theme.PersonalHome">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

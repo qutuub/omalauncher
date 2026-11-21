@@ -1,0 +1,201 @@
+face "home" {
+  meta { owl: 13 }
+  page: 0
+  statusBar: false
+  background: #000000
+  padding: 0
+
+  source now = clock every 1m
+  source battery = android.battery
+  source modes = android.modes
+  source sim = android.sim
+  source alarm = android.alarm
+  source notifications = android.notifications
+  source todo = file("~/vault/todo.md") optional
+  source vault = cmd(todo == "" ? "if test -f ~/vault/todo.md; then echo present; else echo missing; fi" : null) every 5s optional
+
+  let ink = #c0caf5
+  let dim = #8089b3
+  let blueInk = #7aa2f7
+  let warning = #e0af68
+  let rule = #1f2335
+  let radio = sim.present && !modes.airplane ? lower(sim.carrier ?? "sim") + (sim.signal != null ? " ${sim.signal}/4" : "") : null
+  let status = [
+    modes.wifi ? "wifi" : null,
+    radio,
+    modes.airplane ? "airplane" : null,
+    battery.level != null ? {text: "${battery.level}%", color: battery.level <= 20 ? warning : ink} : null,
+    battery.charging ? "charging" : null
+  ].filter(part => part != null)
+  let statusSpans = flatten(status.map((part, i) => i == 0 ? [part] : [" · ", part]))
+
+  let shortNames = {
+    "com.whatsapp": "wa",
+    "com.whatsapp.w4b": "wa",
+    "com.google.android.gm": "gmail",
+    "com.google.android.apps.messaging": "sms",
+    "com.samsung.android.messaging": "sms",
+    "com.android.messaging": "sms",
+    "com.android.mms": "sms",
+    "com.google.android.dialer": "calls",
+    "com.samsung.android.dialer": "calls",
+    "com.samsung.android.incallui": "calls"
+  }
+  let groups = values(groupBy(notifications.items ?? [], item => item.package)).sortBy(g => -len(g))
+  let topApps = groups.take(3)
+  let otherCount = (notifications.count ?? 0) - sum(topApps.map(g => len(g)))
+
+  // Split on LF so blank lines count toward the physical line number.
+  let tasks = split(todo ?? "", "\n").map((raw, i) => {
+    number: i + 1, raw: raw, parts: match(raw, "^- \\[([ x])\\] (.+?)(?: @due\\(([0-9]{4}-[0-9]{2}-[0-9]{2})\\))?\\r?$")
+  }).filter(task => task.parts != null && task.parts[0] == " ")
+  let today = fmtTime(now, "yyyy-MM-dd", null, "en")
+  // Use UTC for arithmetic on civil dates so DST can't move a week boundary.
+  let todayDay = parseTime(today, null, "UTC") / 86400
+  let monday = todayDay - ((todayDay + 3) % 7)
+
+  // run() marks the entire face as Linux-only. An optional source can dispatch
+  // the tap and keep the Android header alive on phones without the guest.
+  state edit = null
+  state ticket = 0
+  state editFailed = false
+  state editDeadline = null
+  source saved = cmd(edit) every 24h status optional
+  on saved first {
+    if edit != null && value.out == str(ticket) {
+      editFailed = !value.ok
+      edit = null
+      editDeadline = null
+    }
+  }
+  // A lost result or repeated identical timeout can leave the source unchanged.
+  // Disarm the command before it can run again on its interval.
+  at editDeadline {
+    editFailed = true
+    edit = null
+    editDeadline = null
+  }
+
+  // Serialize face edits, verify the whole target line, and replace atomically.
+  // The copy also lets us detect unrelated edits made while preparing the save.
+  let toggleScript = """
+    set -eu
+    cd "$HOME/vault"
+    exec 9>.todo.owl.lock
+    flock -x 9
+    test -f todo.md && test ! -L todo.md || exit 1
+    before=$(mktemp .todo.owl.before.XXXXXX)
+    after=
+    trap 'rm -f -- "$before" "$after"' EXIT
+    after=$(mktemp .todo.owl.after.XXXXXX)
+    cp -p -- todo.md "$before"
+    current=$(sed -n "$1 p" "$before")
+    expected=$2
+    # The file source trims the final CR of a CRLF file.
+    test "${current%$'\r'}" = "${expected%$'\r'}"
+    sed "$1 s/^- \[ \]/- [x]/" "$before" > "$after"
+    chmod --reference="$before" "$after"
+    cmp -s -- "$before" todo.md
+    mv -fT -- "$after" todo.md
+  """
+
+  component Hairline() {
+    Spacer { height: 1; fill: width; background: rule }
+  }
+
+  Column {
+    fill: true
+    padding: [16, 8]
+    gap: 6
+    Row {
+      fill: width
+      gap: 8
+      Text { text: fmtTime(now, "HH:mm", null, "en"); font: mono; fontSize: 13; color: ink; maxLines: 1 }
+      Text { spans: statusSpans; font: mono; fontSize: 13; color: ink; align: end; weight: 1; maxLines: 1 }
+    }
+    Row {
+      fill: width
+      gap: 8
+      Text { text: lower(fmtTime(now, "EEE d MMM", null, "en")); font: mono; fontSize: 13; color: dim; weight: 1; maxLines: 1 }
+      if alarm.set {
+        Text { text: "alarm ${fmtTime(alarm.time, "HH:mm", null, "en")}"; font: mono; fontSize: 13; color: dim; maxLines: 1 }
+      }
+    }
+    Hairline { }
+    if notifications.available == false {
+      Text {
+        text: "allow notification access"
+        font: mono
+        fontSize: 13
+        color: blueInk
+        fill: width
+        padding: [0, 8]
+        onTap: notification("open", "")
+      }
+    } else if len(topApps) > 0 {
+      Flow {
+        fill: width
+        gap: 12
+        for g in topApps key g[0].package {
+          let item = g[0]
+          Text {
+            spans: [{text: shortNames[item.package] ?? lower(item.app ?? item.package), color: blueInk}, " ${len(g)}"]
+            font: mono
+            fontSize: 13
+            color: ink
+          }
+        }
+        if otherCount > 0 {
+          Text { spans: [{text: "other", color: blueInk}, " ${otherCount}"]; font: mono; fontSize: 13; color: ink }
+        }
+      }
+    }
+
+    Spacer { weight: 1 }
+
+    Row {
+      fill: width
+      Text { text: "tasks"; font: mono; fontSize: 14; color: blueInk; weight: 1 }
+      if linux && (todo != "" || vault == "present") {
+        Text { text: "${len(tasks)} open"; font: mono; fontSize: 13; color: dim }
+      }
+    }
+    Hairline { }
+    if editFailed {
+      Text { text: "couldn't tick task"; font: mono; fontSize: 13; color: dim; maxLines: 1 }
+    }
+    if !linux {
+      Text { text: "linux is missing"; font: mono; fontSize: 13; color: dim }
+    } else if todo == "" && vault == "missing" {
+      Text { text: "~/vault/todo.md is missing"; font: mono; fontSize: 13; color: dim }
+    } else {
+      Column {
+        fill: width
+        gap: 0
+        for task in tasks.take(6) key task.number {
+          let dueDay = parseTime(task.parts[2], null, "UTC")
+          let dueLabel = dueDay == null ? "" : task.parts[2] == today ? "today" : lower(fmtTime(dueDay, dueDay / 86400 >= monday && dueDay / 86400 < monday + 7 ? "EEE" : "d MMM", "UTC", "en"))
+          Row {
+            fill: width
+            height: 48
+            gap: 10
+            align: center
+            onTap: {
+              if edit == null && now != null {
+                ticket = ticket + 1
+                editDeadline = now + 90
+                edit = "printf '%s' ${int(ticket)}; bash -c ${sh(toggleScript)} owl-todo ${task.number} ${sh(task.raw)} || { rc=$?; printf 'task tick %s failed\\n' ${int(ticket)} >&2; exit \"$rc\"; }"
+              }
+            }
+            Text { text: "[ ]"; font: mono; fontSize: 14; color: ink }
+            Text { text: task.parts[1]; font: mono; fontSize: 14; color: ink; weight: 1; maxLines: 2 }
+            if dueLabel != "" {
+              Text { text: dueLabel; font: mono; fontSize: 13; color: dueLabel == "today" ? warning : dim; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+    Spacer { height: screenInset }
+  }
+}

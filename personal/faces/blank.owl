@@ -1,0 +1,6 @@
+face "blank" {
+  meta { owl: 10 }
+  page: 0
+  background: #000000
+  Spacer { height: 0 }
+}

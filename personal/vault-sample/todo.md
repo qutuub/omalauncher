@@ -1,0 +1,4 @@
+- [ ] Review the inbox @due(2026-11-20)
+- [ ] Water the plants @due(2026-11-22)
+- [ ] Plan December errands @due(2026-12-02)
+- [x] Set up the home face

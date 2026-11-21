@@ -1,7 +1,6 @@
 package dev.omalauncher
 
 import android.annotation.SuppressLint
-import android.app.ActivityManager
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.Context
@@ -15,10 +14,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.withResumed
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.ui.BrowserPages
@@ -42,6 +39,7 @@ import dev.omalauncher.ui.home.PromptRequest
 import dev.omalauncher.widgets.market.Share
 import dev.omalauncher.storage.LauncherData
 import dev.omalauncher.system.AppLanguage
+import dev.omalauncher.personal.android.homeResumed
 
 /** The home screen: widgets, pinned apps and the drawer; Linux windows open as their own tasks. */
 class MainActivity : ComponentActivity() {
@@ -130,34 +128,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         away = false
-        runtime.wm.focus(null)
+        homeResumed(runtime)
         runtime.keyboard.imagePicker = imagePicker
         asks.resumed(runtime)
-        removeStaleWindowTasks()
-        // Made the default home app (or no longer it) while away: only then does Android show us pinned shortcuts.
-        runtime.androidApps.checkShortcutAccess()
         // The user may have set or replaced the wallpaper while we were in the background.
         lifecycleScope.launch { runtime.themes.refreshLiveWallpaper() }
-    }
-
-    /**
-     * Drops Recents cards whose Linux window no longer exists (app exited or process restarted). Asking for the tasks
-     * goes through the system for each one, a few ms on the main thread as home comes back: they're listed off it.
-     */
-    private fun removeStaleWindowTasks() {
-        lifecycleScope.launch {
-            val windows =
-                withContext(Dispatchers.IO) {
-                    getSystemService(ActivityManager::class.java).appTasks.mapNotNull { task ->
-                        val data = runCatching { task.taskInfo?.baseIntent?.data }.getOrNull() ?: return@mapNotNull null
-                        // By its data rather than its class: windows start through aliases too.
-                        if (data.scheme == "omarchy" && data.host == "window") task to data.lastPathSegment else null
-                    }
-                }
-            val stale = windows.filter { (_, handle) -> runtime.wm.windowByHandle(handle) == null }.map { it.first }
-            // A window that just closed removes its own task meanwhile; finishing it again throws.
-            if (stale.isNotEmpty()) withContext(Dispatchers.IO) { stale.forEach { runCatching { it.finishAndRemoveTask() } } }
-        }
     }
 
     /** Whether the launcher was out of sight since it was last in front: Home then only brings it back. */

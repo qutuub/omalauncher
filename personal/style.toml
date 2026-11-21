@@ -1,0 +1,11 @@
+[home]
+home-page = 0
+empty-page-left = false
+empty-page-right = false
+recent-apps = false
+
+[gestures]
+swipe-up = "drawer.owl"
+
+[status-bar]
+shown = true
